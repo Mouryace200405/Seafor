@@ -21,7 +21,7 @@ Format (one block per artifact, always closed):
 ...full content here...
 </canvas>
 
-`kind` tells chati how to render it **natively** — pick the most specific one:
+`kind` tells Seafor how to render it **natively** — pick the most specific one:
 
 - `markdown` — documents, notes, prose, READMEs, lists, tables (default).
 - `html` — a full web page, dashboard, styled report or interactive widget. Provide

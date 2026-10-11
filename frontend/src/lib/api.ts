@@ -21,9 +21,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getSettings: () => req<Settings>("/api/settings"),
-  saveSettings: (data: Partial<Settings> & { api_key?: string }) =>
+  saveSettings: (data: Partial<Settings>) =>
     req<Settings>("/api/settings", { method: "PUT", body: JSON.stringify(data) }),
-  clearApiKey: () => req<Settings>("/api/settings/api-key", { method: "DELETE" }),
 
   getModels: () => req<{ data: ModelInfo[] }>("/api/models").then((r) => r.data),
   getSkills: () => req<Skill[]>("/api/skills"),

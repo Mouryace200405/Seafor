@@ -1,14 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "../lib/store";
 import { useOutsideClick } from "../lib/useOutsideClick";
+import { speak, stopSpeaking, isSpeaking } from "../lib/tts";
 import Icon from "./Icon";
 
 export default function Composer() {
-  const { send, stop, streaming, settings, activeId, prompts } = useChat();
+  const { send, stop, streaming, settings, activeId, prompts, activeThread, messages } = useChat();
   const [text, setText] = useState("");
   const [showPrompts, setShowPrompts] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const promptRef = useOutsideClick<HTMLDivElement>(() => setShowPrompts(false));
+
+  const enabledSkills = activeThread?.enabled_skills || [];
+  const lastAssistant = [...messages].reverse().find(m => m.role === "assistant" && m.content);
+  const speaking = isSpeaking();
 
   useEffect(() => {
     const ta = taRef.current;
@@ -80,6 +85,31 @@ export default function Composer() {
               </div>
             )}
           </div>
+
+          {enabledSkills.length > 0 && (
+            <div className="active-skills" style={{ marginRight: 8 }}>
+              {enabledSkills.map((s) => (
+                <span key={s} className="skill-tag">
+                  <Icon name="sparkles" size={11} />
+                  {s}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {lastAssistant && (
+            <button
+              className={`btn ${speaking ? "primary" : ""}`}
+              onClick={() => {
+                if (speaking) stopSpeaking();
+                else speak(lastAssistant.content, { voice: settings?.tts_voice, rate: settings?.tts_rate });
+              }}
+              title={speaking ? "Stop reading" : "Read last reply"}
+            >
+              <Icon name={speaking ? "volumeX" : "volume"} size={14} />
+            </button>
+          )}
+
           <div className="spacer" />
           <span className="hint">{text.length ? `${text.length} chars` : ""}</span>
           {streaming ? (

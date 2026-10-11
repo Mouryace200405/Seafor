@@ -531,6 +531,10 @@ select:focus {
   font-size: 12.8px;
   line-height: 1.55;
 }
+.msg-content pre .hljs {
+  background: none;
+  color: var(--text-strong);
+}
 .msg-content table {
   border-collapse: collapse;
   width: 100%;

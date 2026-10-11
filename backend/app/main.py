@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import get_settings
 from .database import init_db
 from .routers import artifacts, chat, memory, models, prompts, settings as settings_router, skills, threads
+from .routers.tts_piper import router as tts_router
 
 app_settings = get_settings()
 
@@ -21,7 +22,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="chati", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Seafor", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,6 +40,7 @@ app.include_router(prompts.router)
 app.include_router(skills.router)
 app.include_router(memory.router)
 app.include_router(artifacts.router)
+app.include_router(tts_router)
 
 
 @app.get("/api/health")

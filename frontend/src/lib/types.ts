@@ -1,6 +1,8 @@
 export interface Settings {
   has_api_key: boolean;
   api_key_hint: string;
+  gemini_api_key_hint: string;
+  groq_api_key_hint: string;
   default_model: string;
   system_prompt: string;
   temperature: number;
@@ -10,6 +12,8 @@ export interface Settings {
   auto_tts: boolean;
   context_fraction: number;
   openrouter_configured_via_env: boolean;
+  gemini_configured_via_env: boolean;
+  groq_configured_via_env: boolean;
 }
 
 export interface ModelInfo {
@@ -22,6 +26,7 @@ export interface ModelInfo {
   input_modalities: string[];
   prompt_price: string;
   completion_price: string;
+  provider: string;
 }
 
 export interface Thread {

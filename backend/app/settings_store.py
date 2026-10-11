@@ -8,10 +8,12 @@ from .models import Setting
 
 KEY = "app"
 
+# These are NEVER stored in the DB; they are read from .env only.
+SECRET_KEYS = {"api_key", "gemini_api_key", "groq_api_key", "ollama_base_url"}
+
 DEFAULTS: dict = {
-    "api_key": "",
-    "default_model": "cohere/north-mini-code:free",
-    "system_prompt": "You are chati, a fast, concise and precise assistant. Answer clearly and stay accurate; never invent facts or sources.",
+    "default_model": "ollama/lfm2.5:latest",
+    "system_prompt": "You are Seafor, a fast, concise and precise assistant. Answer clearly and stay accurate; never invent facts or sources.",
     "temperature": 0.7,
     "max_tokens": 0,
     "tts_voice": "",
@@ -25,22 +27,36 @@ async def get_app_settings(session: AsyncSession) -> dict:
     row = await session.get(Setting, KEY)
     data = dict(DEFAULTS)
     if row and isinstance(row.value, dict):
-        data.update({k: v for k, v in row.value.items() if v is not None})
-    if not data.get("api_key"):
-        data["api_key"] = env_settings().openrouter_api_key or ""
+        data.update({
+            k: v
+            for k, v in row.value.items()
+            if v is not None and k not in SECRET_KEYS
+        })
+    # All keys from .env only
+    env = env_settings()
+    data["api_key"] = getattr(env, "openrouter_api_key", "") or ""
+    data["gemini_api_key"] = getattr(env, "gemini_api_key", "") or ""
+    data["groq_api_key"] = getattr(env, "groq_api_key", "") or ""
+    data["ollama_base_url"] = getattr(env, "ollama_base_url", "") or "http://localhost:11434"
     return data
 
 
 async def update_app_settings(session: AsyncSession, updates: dict) -> dict:
-    data = await get_app_settings(session)
-    for key, value in updates.items():
-        if value is not None:
-            data[key] = value
     row = await session.get(Setting, KEY)
+    stored = dict(DEFAULTS)
+    if row and isinstance(row.value, dict):
+        stored.update({
+            k: v
+            for k, v in row.value.items()
+            if v is not None and k not in SECRET_KEYS
+        })
+    for key, value in updates.items():
+        if value is not None and key not in SECRET_KEYS:
+            stored[key] = value
     if row is None:
-        row = Setting(key=KEY, value=data)
+        row = Setting(key=KEY, value=stored)
         session.add(row)
     else:
-        row.value = data
+        row.value = stored
     await session.commit()
-    return data
+    return await get_app_settings(session)

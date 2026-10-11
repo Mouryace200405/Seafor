@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# chati launcher
+# Seafor launcher
 #
 #   ./run.sh          # dev:  backend :8000  +  vite dev :5173
 #   ./run.sh --prod   # prod: build frontend, serve everything from backend :8000

@@ -6,12 +6,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    app_name: str = "chati"
+    app_name: str = "Seafor"
 
     database_url: str = "postgresql+asyncpg://chati:chati@127.0.0.1:5432/chati"
 
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_api_key: str | None = None
+    gemini_api_key: str | None = None
+    groq_api_key: str | None = None
+    ollama_base_url: str = "http://localhost:11434"
 
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 

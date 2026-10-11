@@ -17,7 +17,7 @@ export default function Message({
   message: Msg;
   onOpenArtifact: (id: string) => void;
 }) {
-  const { settings, regenerate, deleteMessage, streaming } = useChat();
+  const { settings, regenerate, deleteMessage, streaming, setNotice } = useChat();
   const [copied, setCopied] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const isUser = message.role === "user";
@@ -55,7 +55,11 @@ export default function Message({
       stopSpeaking();
       setSpeaking(false);
     } else {
-      speak(message.content, { voice: settings?.tts_voice, rate: settings?.tts_rate });
+      speak(
+        message.content,
+        { voice: settings?.tts_voice, rate: settings?.tts_rate },
+        (msg) => setNotice(msg),
+      );
       setSpeaking(true);
     }
   };

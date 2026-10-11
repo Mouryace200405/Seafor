@@ -15,7 +15,7 @@ from .. import context as ctx
 from .. import memory as mem
 from ..database import SessionLocal, get_session
 from ..models import Artifact, Message, Thread
-from ..openrouter import get_model_info, stream_chat
+from ..providers import get_model_info, stream_chat
 from ..schemas import ChatRequest
 from ..settings_store import get_app_settings
 from ..skills import build_system_context
@@ -48,6 +48,35 @@ async def _extract_memories_bg(
         pass
 
 
+def _get_provider_for_model(model: str) -> str:
+    model_lower = model.lower()
+    if model_lower.startswith("ollama/"):
+        return "ollama"
+    if model_lower.startswith("gemini/"):
+        return "gemini"
+    if model_lower.startswith("groq/"):
+        return "groq"
+    if model_lower.startswith("openrouter/"):
+        return "openrouter"
+    # Legacy / bare-id heuristics.
+    if model_lower.startswith("models/") or model_lower.startswith("gemini-") or "gemini" in model_lower:
+        return "gemini"
+    if any(x in model_lower for x in ["llama", "mixtral", "gemma", "qwen"]):
+        return "groq"
+    return "openrouter"
+
+
+def _get_api_key_for_model(app_settings: dict, model: str) -> str | None:
+    provider = _get_provider_for_model(model)
+    if provider == "gemini":
+        return app_settings.get("gemini_api_key") or None
+    if provider == "groq":
+        return app_settings.get("groq_api_key") or None
+    if provider == "ollama":
+        return ""  # Ollama doesn't need an API key
+    return app_settings.get("api_key") or None
+
+
 @router.post("/{thread_id}/chat")
 async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession = Depends(get_session)):
     thread = await session.get(Thread, thread_id)
@@ -55,11 +84,15 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
         raise HTTPException(404, "Thread not found")
 
     app_settings = await get_app_settings(session)
-    api_key = app_settings.get("api_key") or None
-    if not api_key:
-        raise HTTPException(400, "No OpenRouter API key set. Add one in Settings.")
 
-    model = payload.model or thread.model or app_settings.get("default_model") or "openai/gpt-4o-mini"
+    model = payload.model or thread.model or app_settings.get("default_model") or "cohere/north-mini-code:free"
+    provider = _get_provider_for_model(model)
+    api_key = _get_api_key_for_model(app_settings, model)
+    
+    # Only require API key for non-Ollama providers
+    if provider != "ollama" and not api_key:
+        raise HTTPException(400, f"No API key set for {provider} model {model}. Add one in Settings.")
+
     temperature = payload.temperature if payload.temperature is not None else app_settings.get("temperature", 0.7)
     max_tokens = payload.max_tokens if payload.max_tokens is not None else app_settings.get("max_tokens", 0)
     base_prompt = (
@@ -110,7 +143,13 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
     )
     system_tokens = ctx.estimate_tokens(system_content) + ctx.estimate_tokens(thread.summary or "")
 
-    model_info = await get_model_info(model, api_key)
+    model_info = await get_model_info(
+        model, 
+        api_key, 
+        app_settings.get("ollama_base_url"),
+        gemini_api_key=app_settings.get("gemini_api_key"),
+        groq_api_key=app_settings.get("groq_api_key")
+    )
     context_length = model_info.get("context_length") or 8192
 
     history = ctx.history_after_cursor(msgs, thread.summary_cursor)
@@ -126,6 +165,8 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
             history=history,
             model_id=model,
             api_key=api_key,
+            gemini_api_key=app_settings.get("gemini_api_key"),
+            groq_api_key=app_settings.get("groq_api_key"),
         )
         if cursor:
             thread.summary = new_summary
@@ -181,8 +222,11 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
                 messages=built.messages,
                 model=model,
                 api_key=api_key,
+                gemini_api_key=app_settings.get("gemini_api_key"),
+                groq_api_key=app_settings.get("groq_api_key"),
                 temperature=temperature,
                 max_tokens=max_tokens or None,
+                ollama_base_url=app_settings.get("ollama_base_url"),
             ):
                 etype = event.get("type")
                 if etype == "delta":
@@ -238,10 +282,14 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
                 meta["reasoning"] = reasoning
             if error:
                 meta["error"] = error
+            used_skills = list(enabled_skills)
             if artifact_payloads:
                 meta["canvas"] = artifact_payloads
+                if "canvas" not in used_skills:
+                    used_skills.append("canvas")
             if saved_tokens:
                 meta["tokens_saved"] = saved_tokens
+            meta["skills_used"] = used_skills
 
             stored_content = cleaned if blocks else full
             msg.content = stored_content
@@ -251,6 +299,9 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
             db.add(msg)
             await db.commit()
 
+        used_skills = list(enabled_skills)
+        if artifact_payloads and "canvas" not in used_skills:
+            used_skills.append("canvas")
         yield _sse(
             "final",
             {
@@ -261,6 +312,7 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
                 "tokens_saved": saved_tokens,
                 "usage": usage,
                 "error": error,
+                "skills_used": used_skills,
             },
         )
         yield _sse("done", {})

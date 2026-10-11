@@ -79,7 +79,7 @@ def build_system_context(
     """
     parts: list[str] = []
 
-    persona = base_prompt.strip() or "You are chati, a fast, concise and precise assistant."
+    persona = base_prompt.strip() or "You are Seafor, a fast, concise and precise assistant."
     parts.append(f"# Role\n{persona}")
 
     if memories:

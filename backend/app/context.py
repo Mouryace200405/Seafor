@@ -103,6 +103,8 @@ async def compact(
     history: list[dict],
     model_id: str,
     api_key: str | None,
+    gemini_api_key: str | None = None,
+    groq_api_key: str | None = None,
     keep_recent: int | None = None,
 ) -> tuple[str, str | None]:
     """Summarize the oldest part of history, leaving the most recent messages
@@ -133,6 +135,8 @@ async def compact(
             messages=[{"role": "user", "content": prompt}],
             model=model_id,
             api_key=api_key,
+            gemini_api_key=gemini_api_key,
+            groq_api_key=groq_api_key,
             temperature=0.2,
             max_tokens=800,
         )

@@ -1,4 +1,4 @@
-# chati
+# Seafor
 
 A fast, lightweight chat harness for **OpenRouter** models, with **model-switch-safe
 context**, a **Canvas** for generated documents/code, **skills**, **TTS**, a **prompt
@@ -44,7 +44,7 @@ Stack: **React (Vite + TypeScript)** · **FastAPI** · **PostgreSQL**.
 ## Layout
 
 ```
-chati/
+seafor/
 ├── run.sh                 # one-command launcher (dev or --prod)
 ├── docker-compose.yml     # optional Postgres
 ├── .env.example

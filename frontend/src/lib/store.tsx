@@ -42,8 +42,7 @@ interface ChatState {
   setModel: (id: string) => Promise<void>;
   toggleSkill: (name: string) => Promise<void>;
   setCanvasOpen: (open: boolean) => void;
-  saveSettings: (data: Partial<Settings> & { api_key?: string }) => Promise<void>;
-  clearApiKey: () => Promise<void>;
+  saveSettings: (data: Partial<Settings>) => Promise<void>;
   refreshPrompts: () => Promise<void>;
   refreshMemories: () => Promise<void>;
   addMemory: (content: string, kind?: string, pinned?: boolean) => Promise<void>;
@@ -305,7 +304,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         abortRef.current = null;
         await refreshActive(threadId);
         if (settings?.auto_tts && acc.trim()) {
-          speak(acc, { voice: settings.tts_voice, rate: settings.tts_rate });
+          speak(
+            acc,
+            { voice: settings.tts_voice, rate: settings.tts_rate },
+            (msg) => setNotice(msg),
+          );
         }
       }
     },
@@ -389,14 +392,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setArtifacts([]);
   }, [activeId]);
 
-  const saveSettings = useCallback(async (data: Partial<Settings> & { api_key?: string }) => {
+  const saveSettings = useCallback(async (data: Partial<Settings>) => {
     const s = await api.saveSettings(data);
     setSettings(s);
-    if (data.api_key) reloadModels();
-  }, [reloadModels]);
-
-  const clearApiKey = useCallback(async () => {
-    setSettings(await api.clearApiKey());
   }, []);
 
   const upsertArtifact = useCallback((artifact: Artifact) => {
@@ -457,7 +455,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     toggleSkill,
     setCanvasOpen,
     saveSettings,
-    clearApiKey,
     refreshPrompts,
     refreshMemories,
     addMemory,

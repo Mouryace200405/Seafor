@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 import { useChat } from "../lib/store";
-import { getVoices, onVoicesReady } from "../lib/tts";
+import { getVoices, isSupported, onVoicesReady, speak } from "../lib/tts";
 import Icon from "./Icon";
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
-  const { settings, saveSettings, clearApiKey, models } = useChat();
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
+  const { settings, saveSettings, models, setNotice } = useChat();
   const [defaultModel, setDefaultModel] = useState(settings?.default_model || "");
   const [systemPrompt, setSystemPrompt] = useState(settings?.system_prompt || "");
   const [temperature, setTemperature] = useState(settings?.temperature ?? 0.7);
@@ -20,6 +18,18 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => onVoicesReady(() => setVoices(getVoices())), []);
 
+  const testVoice = () => {
+    if (!isSupported()) {
+      setNotice("This browser does not support speech synthesis.");
+      return;
+    }
+    if (!voices.length) {
+      setNotice("No system voices found. Install a TTS engine (e.g. speech-dispatcher + espeak-ng), then reload.");
+      return;
+    }
+    speak("This is Seafor. Text to speech is working.", { voice, rate }, (m) => setNotice(m));
+  };
+
   const save = async () => {
     setSaving(true);
     const payload: any = {
@@ -32,7 +42,6 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       auto_tts: autoTts,
       context_fraction: ctxFraction,
     };
-    if (apiKey.trim()) payload.api_key = apiKey.trim();
     await saveSettings(payload);
     setSaving(false);
     onClose();
@@ -50,30 +59,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
         <div className="modal-body">
           <div className="field">
-            <label>OpenRouter API key</label>
-            <div className="row">
-              <input
-                style={{ flex: 1 }}
-                type={showKey ? "text" : "password"}
-                placeholder={settings?.has_api_key ? `Stored ${settings.api_key_hint} — enter new to replace` : "sk-or-…"}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-              />
-              <button className="btn icon" onClick={() => setShowKey((s) => !s)}>
-                <Icon name="search" size={14} />
-              </button>
-            </div>
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <span className="hint">
-                {settings?.has_api_key ? "A key is configured." : "No key yet."}
-                {settings?.openrouter_configured_via_env ? " (env fallback available)" : ""}
-              </span>
-              {settings?.has_api_key && (
-                <button className="btn ghost danger" onClick={clearApiKey}>
-                  Clear key
-                </button>
-              )}
-            </div>
+            <label>API Keys</label>
+            <span className="hint">All API keys are read from .env file only. Edit backend/.env to configure OpenRouter, Gemini, Groq, or Ollama.</span>
           </div>
 
           <div className="field">
@@ -82,7 +69,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             <datalist id="model-list">
               {models.slice(0, 300).map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.name}
+                  {m.name} ({m.provider})
                 </option>
               ))}
             </datalist>
@@ -160,6 +147,15 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 style={{ width: 110 }}
               />
               <span className="val">{rate.toFixed(2)}x</span>
+            </div>
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <button className="btn" onClick={testVoice} type="button">
+                <Icon name="volume" size={14} />
+                Test voice
+              </button>
+              <span className="hint">
+                {voices.length ? `${voices.length} voices available` : "No system voices detected"}
+              </span>
             </div>
             <label className="check-item" style={{ paddingLeft: 0 }}>
               <input type="checkbox" checked={autoTts} onChange={(e) => setAutoTts(e.target.checked)} />

@@ -12,8 +12,12 @@ class ORMModel(BaseModel):
 
 # ---------------------------------------------------------------- settings
 class SettingsOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     has_api_key: bool
     api_key_hint: str = ""
+    gemini_api_key_hint: str = ""
+    groq_api_key_hint: str = ""
     default_model: str = ""
     system_prompt: str = ""
     temperature: float = 0.7
@@ -23,10 +27,11 @@ class SettingsOut(BaseModel):
     auto_tts: bool = False
     context_fraction: float = 0.72
     openrouter_configured_via_env: bool = False
+    gemini_configured_via_env: bool = False
+    groq_configured_via_env: bool = False
 
 
 class SettingsUpdate(BaseModel):
-    api_key: str | None = None
     default_model: str | None = None
     system_prompt: str | None = None
     temperature: float | None = None

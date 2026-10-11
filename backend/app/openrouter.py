@@ -19,7 +19,7 @@ def _headers(api_key: str | None) -> dict[str, str]:
     headers = {
         "Content-Type": "application/json",
         "HTTP-Referer": "http://localhost:5173",
-        "X-Title": "chati",
+        "X-Title": "Seafor",
     }
     if key:
         headers["Authorization"] = f"Bearer {key}"

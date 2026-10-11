@@ -49,6 +49,10 @@ export default function ChatWindow({
   }, [ordered]);
 
   useEffect(() => {
+    if (artifacts.length > 0 && !canvasOpen) setCanvasOpen(true);
+  }, [artifacts, canvasOpen, setCanvasOpen]);
+
+  useEffect(() => {
     const el = scrollRef.current;
     if (!el || !stick.current) return;
     el.scrollTop = el.scrollHeight;
@@ -103,22 +107,6 @@ export default function ChatWindow({
 
         <SkillsMenu />
 
-        {enabledSkills.length > 0 && (
-          <div className="active-skills" title="Active skills">
-            {enabledSkills.map((s) => (
-              <button
-                key={s}
-                className="skill-tag"
-                onClick={() => toggleSkill(s)}
-                title={`Turn off ${s}`}
-              >
-                <Icon name="sparkles" size={11} />
-                {s}
-              </button>
-            ))}
-          </div>
-        )}
-
         <div className="spacer" />
 
         {activeId && context.count > 0 && (
@@ -142,7 +130,7 @@ export default function ChatWindow({
       <div className="messages" ref={scrollRef} onScroll={onScroll}>
         {!activeId ? (
           <div className="empty">
-            <div className="logo">chati</div>
+            <div className="logo">Seafor</div>
             <h2>Start a thread</h2>
             <div>Chat with any OpenRouter model. Switch models without losing context.</div>
             <div className="suggestions">
@@ -151,7 +139,7 @@ export default function ChatWindow({
           </div>
         ) : ordered.length === 0 ? (
           <div className="empty">
-            <div className="logo">chati</div>
+            <div className="logo">Seafor</div>
             <h2>What can I help with?</h2>
             <div className="suggestions">
               {SUGGESTIONS.map((s) => (

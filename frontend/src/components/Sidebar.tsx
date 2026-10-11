@@ -38,7 +38,7 @@ export default function Sidebar({
     <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
       <div className="sidebar-head">
         <div className="brand">
-          cha<span>ti</span>
+          Sea<span>for</span>
         </div>
         <div className="spacer" style={{ flex: 1 }} />
         <button className="btn primary" onClick={newThread} title="New thread">

@@ -1,19 +1,21 @@
-let currentUtterance: SpeechSynthesisUtterance | null = null;
+let currentAudio: HTMLAudioElement | null = null;
 
 export function getVoices(): SpeechSynthesisVoice[] {
-  if (typeof window === "undefined" || !window.speechSynthesis) return [];
-  return window.speechSynthesis.getVoices();
+  return [];
 }
 
 export function onVoicesReady(cb: () => void): () => void {
-  if (typeof window === "undefined" || !window.speechSynthesis) return () => {};
-  const handler = () => cb();
-  window.speechSynthesis.addEventListener("voiceschanged", handler);
-  if (window.speechSynthesis.getVoices().length) cb();
-  return () => window.speechSynthesis.removeEventListener("voiceschanged", handler);
+  cb();
+  return () => {};
 }
 
-/** Strip markdown / canvas markers so TTS reads clean prose. */
+export function isSupported(): boolean {
+  return true;
+}
+
+export function unlockTTS(): void {
+}
+
 export function cleanForSpeech(text: string): string {
   return text
     .replace(/```[\s\S]*?```/g, " code block ")
@@ -28,33 +30,41 @@ export function cleanForSpeech(text: string): string {
     .trim();
 }
 
-export function isSupported(): boolean {
-  return typeof window !== "undefined" && "speechSynthesis" in window;
-}
-
-export function speak(text: string, opts: { voice?: string; rate?: number } = {}): void {
-  if (!isSupported()) return;
-  const synth = window.speechSynthesis;
-  synth.cancel();
-  const utter = new SpeechSynthesisUtterance(cleanForSpeech(text));
-  utter.rate = opts.rate ?? 1;
-  if (opts.voice) {
-    const match = getVoices().find((v) => v.name === opts.voice);
-    if (match) utter.voice = match;
+export function speak(
+  text: string,
+  opts: { voice?: string; rate?: number } = {},
+  onError?: (msg: string) => void,
+): void {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
   }
-  utter.onend = () => {
-    if (currentUtterance === utter) currentUtterance = null;
-  };
-  currentUtterance = utter;
-  synth.speak(utter);
+  const clean = cleanForSpeech(text);
+  if (!clean) return;
+  const url = `/api/tts/synthesize`;
+  currentAudio = new Audio();
+  currentAudio.src = url;
+  const body = JSON.stringify({ text: clean, speed: opts.rate ?? 1 });
+  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body })
+    .then((r) => {
+      if (!r.ok) throw new Error(`TTS ${r.status}`);
+      return r.blob();
+    })
+    .then((blob) => {
+      currentAudio!.src = URL.createObjectURL(blob);
+      currentAudio!.play().catch((e) => onError?.(e.message));
+    })
+    .catch((e) => onError?.(e.message));
 }
 
 export function stopSpeaking(): void {
-  if (!isSupported()) return;
-  window.speechSynthesis.cancel();
-  currentUtterance = null;
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.src = "";
+    currentAudio = null;
+  }
 }
 
 export function isSpeaking(): boolean {
-  return isSupported() && window.speechSynthesis.speaking;
+  return !!currentAudio && !currentAudio.paused && !currentAudio.ended;
 }

@@ -17,22 +17,38 @@ function ctxLabel(n: number): string {
   return `${n} ctx`;
 }
 
+function providerLabel(m: ModelInfo): string {
+  const p = (m.provider || "").toLowerCase();
+  if (p === "openrouter") return "OpenRouter";
+  if (p === "gemini") return "Gemini";
+  if (p === "groq") return "Groq";
+  if (p === "ollama") return "Ollama";
+  return m.provider || "—";
+}
+
+function isFree(m: ModelInfo): boolean {
+  const p = parseFloat(m.prompt_price || "0");
+  const c = parseFloat(m.completion_price || "0");
+  return p === 0 && c === 0;
+}
+
 export default function ModelPicker() {
   const { models, currentModel, setModel, modelsError, reloadModels } = useChat();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const ref = useOutsideClick<HTMLDivElement>(() => setOpen(false));
 
-  const current = models.find((m) => m.id === currentModel);
+  const freeModels = useMemo(() => models.filter(isFree), [models]);
+  const current = freeModels.find((m) => m.id === currentModel) || models.find((m) => m.id === currentModel);
   const label = current?.name || currentModel || "Select model";
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = q
-      ? models.filter((m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
-      : models;
+      ? freeModels.filter((m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+      : freeModels;
     return list.slice(0, 200);
-  }, [models, query]);
+  }, [freeModels, query]);
 
   return (
     <div className="popover" ref={ref}>
@@ -48,7 +64,7 @@ export default function ModelPicker() {
           <div className="dropdown-search">
             <input
               autoFocus
-              placeholder={`Search ${models.length} models…`}
+              placeholder={`Search ${freeModels.length} free models…`}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -74,13 +90,14 @@ export default function ModelPicker() {
                 <div className="dd-name">{m.name}</div>
                 <div className="dd-sub">
                   <span>{m.id}</span>
+                  <span>{providerLabel(m)}</span>
                   <span>{ctxLabel(m.context_length)}</span>
                   <span>{priceLabel(m)}</span>
                 </div>
               </div>
             ))}
             {!modelsError && filtered.length === 0 && (
-              <div style={{ padding: 12, color: "var(--muted)", fontSize: 12.5 }}>No models found.</div>
+              <div style={{ padding: 12, color: "var(--muted)", fontSize: 12.5 }}>No free models found.</div>
             )}
           </div>
         </div>
