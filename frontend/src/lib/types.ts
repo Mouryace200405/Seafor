@@ -11,6 +11,17 @@ export interface Settings {
   tts_rate: number;
   auto_tts: boolean;
   context_fraction: number;
+  voting_models: string[];
+  voting_consistency: string;
+  voting_permutation: string;
+  voting_min_votes: number;
+  voting_tie_break: string;
+  dictatorship_generators: string[];
+  dictatorship_judge: string;
+  routing_router_model: string;
+  routing_decision_model: string;
+  routing_submode: string;
+  routing_models: Record<string, string>;
   openrouter_configured_via_env: boolean;
   gemini_configured_via_env: boolean;
   groq_configured_via_env: boolean;
@@ -35,6 +46,7 @@ export interface Thread {
   model: string;
   system_prompt: string;
   enabled_skills: string[];
+  mode?: string;
   pinned: boolean;
   archived: boolean;
   created_at: string;

@@ -20,6 +20,34 @@ DEFAULTS: dict = {
     "tts_rate": 1.0,
     "auto_tts": False,
     "context_fraction": 0.72,
+    # EFT voting mode
+    "voting_models": [
+        "groq/openai/gpt-oss-20b",
+        "ollama/lfm2.5:latest",
+        "ollama/ministral-3:3b",
+    ],
+    "voting_consistency": "majority",
+    "voting_permutation": "cyclic",
+    "voting_min_votes": 1,
+    "voting_tie_break": "random",
+    # EFT dictatorship mode
+    "dictatorship_generators": [
+        "groq/openai/gpt-oss-20b",
+        "ollama/lfm2.5:latest",
+        "ollama/ministral-3:3b",
+    ],
+    "dictatorship_judge": "groq/openai/gpt-oss-120b",
+    # EFT routing mode
+    "routing_submode": "llm",
+    "routing_router_model": "ollama/qwen3.5:4b",
+    "routing_decision_model": "ollama/tev1:4b",
+    "routing_models": {
+        "coder": "groq/openai/gpt-oss-20b",
+        "multimodal": "",
+        "reasoning": "groq/openai/gpt-oss-120b",
+        "rag": "groq/openai/gpt-oss-20b",
+        "general": "groq/openai/gpt-oss-20b",
+    },
 }
 
 

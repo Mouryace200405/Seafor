@@ -19,6 +19,9 @@ from ..providers import get_model_info, stream_chat
 from ..schemas import ChatRequest
 from ..settings_store import get_app_settings
 from ..skills import build_system_context
+from ..dictatorship import run_dictatorship
+from ..routing import ROUTE_LABELS, VALID_ROUTES, decide_route, model_for_category
+from ..voting import run_voting
 
 router = APIRouter(prefix="/api/threads", tags=["chat"])
 
@@ -33,7 +36,13 @@ def _title_from(text: str) -> str:
 
 
 async def _extract_memories_bg(
-    thread_id: uuid.UUID, model: str, api_key: str | None, transcript: str
+    thread_id: uuid.UUID,
+    model: str,
+    api_key: str | None,
+    transcript: str,
+    gemini_api_key: str | None = None,
+    groq_api_key: str | None = None,
+    ollama_base_url: str | None = None,
 ) -> None:
     try:
         async with SessionLocal() as db:
@@ -42,6 +51,9 @@ async def _extract_memories_bg(
                 transcript=transcript,
                 model=model,
                 api_key=api_key,
+                gemini_api_key=gemini_api_key,
+                groq_api_key=groq_api_key,
+                ollama_base_url=ollama_base_url,
                 source_thread_id=thread_id,
             )
     except Exception:  # noqa: BLE001
@@ -122,6 +134,250 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
         await session.commit()
         await session.refresh(user_msg)
 
+    # ------------------------------------------------------ EFT voting mode
+    if thread.mode == "voting":
+        if user_msg is not None:
+            question = user_msg.content
+        else:
+            last_user = (
+                await session.execute(
+                    select(Message)
+                    .where(Message.thread_id == thread_id, Message.role == "user")
+                    .order_by(Message.created_at.desc())
+                    .limit(1)
+                )
+            ).scalars().first()
+            question = last_user.content if last_user else ""
+
+        voting_models = payload.voting_models or app_settings.get("voting_models") or []
+        assistant = Message(
+            thread_id=thread_id,
+            role="assistant",
+            content="",
+            model="voting",
+            meta={"mode": "voting"},
+        )
+        session.add(assistant)
+        await session.commit()
+        await session.refresh(assistant)
+        assistant_id = assistant.id
+
+        async def voting_generate() -> AsyncIterator[str]:
+            yield _sse("start", {"message_id": str(assistant_id), "model": "voting", "mode": "voting"})
+            result: dict | None = None
+            try:
+                async for ev in run_voting(
+                    question=question,
+                    models=voting_models,
+                    app_settings=app_settings,
+                    system_prompt=base_prompt,
+                    consistency=app_settings.get("voting_consistency", "majority"),
+                    perm_strategy=app_settings.get("voting_permutation", "cyclic"),
+                    min_votes=app_settings.get("voting_min_votes", 1),
+                    tie_break=app_settings.get("voting_tie_break", "random"),
+                    tie_priority=voting_models,
+                ):
+                    if ev.get("type") == "voting_result":
+                        result = ev
+                    yield _sse("voting", ev)
+            except Exception as exc:  # noqa: BLE001
+                yield _sse("error", {"message": str(exc)})
+
+            answer = (result or {}).get("answer") or "No answer produced."
+            cleaned, blocks = art.parse_canvas_blocks(answer)
+            saved_tokens = 0
+            artifact_payloads = []
+            async with SessionLocal() as db:
+                msg = await db.get(Message, assistant_id)
+                if msg is None:
+                    yield _sse("done", {})
+                    return
+                for block in blocks:
+                    artifact = Artifact(
+                        thread_id=thread_id,
+                        message_id=assistant_id,
+                        title=block.title,
+                        kind=block.kind,
+                        language=block.language,
+                    )
+                    artifact_payloads.append(artifact)
+                    db.add(artifact)
+                stored = cleaned if blocks else answer
+                msg.content = stored
+                msg.meta = {"mode": "voting", "voting": result}
+                saved_tokens = sum(
+                    len(b.content.split()) for b in blocks
+                )
+                db.add(msg)
+                await db.commit()
+
+            yield _sse("final", {
+                "message_id": str(assistant_id),
+                "content": cleaned if blocks else answer,
+                "mode": "voting",
+                "voting": result,
+                "error": None,
+            })
+            yield _sse("done", {})
+
+        return StreamingResponse(
+            voting_generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # ------------------------------------------------- EFT dictatorship mode
+    if thread.mode == "dictatorship":
+        if user_msg is not None:
+            question = user_msg.content
+        else:
+            last_user = (
+                await session.execute(
+                    select(Message)
+                    .where(Message.thread_id == thread_id, Message.role == "user")
+                    .order_by(Message.created_at.desc())
+                    .limit(1)
+                )
+            ).scalars().first()
+            question = last_user.content if last_user else ""
+
+        generators = app_settings.get("dictatorship_generators") or []
+        judge_model = app_settings.get("dictatorship_judge") or ""
+
+        assistant = Message(
+            thread_id=thread_id,
+            role="assistant",
+            content="",
+            model="dictatorship",
+            meta={"mode": "dictatorship"},
+        )
+        session.add(assistant)
+        await session.commit()
+        await session.refresh(assistant)
+        assistant_id = assistant.id
+
+        async def dictatorship_generate() -> AsyncIterator[str]:
+            yield _sse("start", {"message_id": str(assistant_id), "model": "dictatorship", "mode": "dictatorship"})
+            result: dict | None = None
+            try:
+                async for ev in run_dictatorship(
+                    question=question,
+                    generators=generators,
+                    judge_model=judge_model,
+                    app_settings=app_settings,
+                    system_prompt=base_prompt,
+                ):
+                    if ev.get("type") == "dictatorship_result":
+                        result = ev
+                    yield _sse("dictatorship", ev)
+            except Exception as exc:  # noqa: BLE001
+                yield _sse("error", {"message": str(exc)})
+
+            answer = (result or {}).get("answer") or "No answer produced."
+            cleaned, blocks = art.parse_canvas_blocks(answer)
+            artifact_payloads = []
+            async with SessionLocal() as db:
+                msg = await db.get(Message, assistant_id)
+                if msg is None:
+                    yield _sse("done", {})
+                    return
+                for block in blocks:
+                    artifact = Artifact(
+                        thread_id=thread_id,
+                        message_id=assistant_id,
+                        title=block.title,
+                        kind=block.kind,
+                        language=block.language,
+                    )
+                    artifact_payloads.append(artifact)
+                    db.add(artifact)
+                msg.content = cleaned if blocks else answer
+                msg.meta = {"mode": "dictatorship", "dictatorship": result}
+                db.add(msg)
+                await db.commit()
+
+            yield _sse("final", {
+                "message_id": str(assistant_id),
+                "content": cleaned if blocks else answer,
+                "mode": "dictatorship",
+                "dictatorship": result,
+                "error": None,
+            })
+            yield _sse("done", {})
+
+        return StreamingResponse(
+            dictatorship_generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # ------------------------------------------------------ EFT routing mode
+    # Decide a lane with the router model, then answer with that lane's model
+    # through the normal streaming path below.
+    routing_meta: dict | None = None
+    if thread.mode == "routing":
+        if user_msg is not None:
+            question = user_msg.content
+        else:
+            last_user = (
+                await session.execute(
+                    select(Message)
+                    .where(Message.thread_id == thread_id, Message.role == "user")
+                    .order_by(Message.created_at.desc())
+                    .limit(1)
+                )
+            ).scalars().first()
+            question = last_user.content if last_user else ""
+
+        router_model = app_settings.get("routing_router_model") or ""
+        decision_model = app_settings.get("routing_decision_model") or ""
+        submode = app_settings.get("routing_submode") or "llm"
+        routing_models = app_settings.get("routing_models") or {}
+        try:
+            decision = await decide_route(
+                question=question,
+                router_model=router_model,
+                decision_model=decision_model,
+                submode=submode,
+                app_settings=app_settings,
+            )
+        except Exception as exc:  # noqa: BLE001
+            decision = {
+                "category": "general",
+                "raw": f"[router failed: {exc}]",
+                "attempts": 1,
+                "router_model": router_model,
+                "parsed": False,
+            }
+        category = decision["category"]
+        model = model_for_category(category, routing_models, model)
+        provider = _get_provider_for_model(model)
+        api_key = _get_api_key_for_model(app_settings, model)
+        if provider != "ollama" and not api_key:
+            raise HTTPException(400, f"No API key set for {provider} model {model}. Add one in Settings.")
+        routing_meta = {
+            "submode": submode,
+            "category": category,
+            "label": ROUTE_LABELS.get(category, category.title()),
+            "model": model,
+            "router_model": decision["router_model"],
+            "raw": decision["raw"],
+            "attempts": decision.get("attempts", 1),
+            "parsed": decision.get("parsed", False),
+            "routes": VALID_ROUTES,
+        }
+        for key in ("probabilities", "confidence", "valid_mass", "n_prompt_tokens"):
+            if decision.get(key) is not None:
+                routing_meta[key] = decision[key]
+
     # ------------------------------------------------------ canonical history
     msgs = list(
         (await session.execute(
@@ -167,6 +423,7 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
             api_key=api_key,
             gemini_api_key=app_settings.get("gemini_api_key"),
             groq_api_key=app_settings.get("groq_api_key"),
+            ollama_base_url=app_settings.get("ollama_base_url"),
         )
         if cursor:
             thread.summary = new_summary
@@ -182,16 +439,20 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
     )
 
     # ------------------------------------------------------ assistant placeholder
+    placeholder_meta = {
+        "streaming": True,
+        "skills": list(enabled_skills),
+        "memories": len(memories),
+    }
+    if routing_meta:
+        placeholder_meta["mode"] = "routing"
+        placeholder_meta["routing"] = routing_meta
     assistant = Message(
         thread_id=thread_id,
         role="assistant",
         content="",
         model=model,
-        meta={
-            "streaming": True,
-            "skills": list(enabled_skills),
-            "memories": len(memories),
-        },
+        meta=placeholder_meta,
     )
     session.add(assistant)
     await session.commit()
@@ -207,10 +468,15 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
                 "message_id": str(assistant_id),
                 "user_message_id": str(user_id) if user_id else None,
                 "model": model,
+                "mode": "routing" if routing_meta else None,
+                "routing": routing_meta,
                 "input_tokens_estimate": built.estimated_input_tokens,
                 "folded_system": built.folded_system,
             },
         )
+
+        if routing_meta:
+            yield _sse("routing", {"type": "routing_result", **routing_meta})
 
         full = ""
         reasoning = ""
@@ -313,6 +579,8 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
                 "usage": usage,
                 "error": error,
                 "skills_used": used_skills,
+                "mode": "routing" if routing_meta else None,
+                "routing": routing_meta,
             },
         )
         yield _sse("done", {})
@@ -324,7 +592,15 @@ async def chat(thread_id: uuid.UUID, payload: ChatRequest, session: AsyncSession
                 f"{m.role.upper()}: {m.content}" for m in msgs if m.content
             ) + f"\nASSISTANT: {cleaned if blocks else full}"
             asyncio.create_task(
-                _extract_memories_bg(thread_id, model, api_key, transcript)
+                _extract_memories_bg(
+                    thread_id,
+                    model,
+                    api_key,
+                    transcript,
+                    app_settings.get("gemini_api_key"),
+                    app_settings.get("groq_api_key"),
+                    app_settings.get("ollama_base_url"),
+                )
             )
 
     return StreamingResponse(

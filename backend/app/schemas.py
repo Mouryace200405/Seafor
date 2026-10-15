@@ -26,6 +26,17 @@ class SettingsOut(BaseModel):
     tts_rate: float = 1.0
     auto_tts: bool = False
     context_fraction: float = 0.72
+    voting_models: list[str] = []
+    voting_consistency: str = "majority"
+    voting_permutation: str = "cyclic"
+    voting_min_votes: int = 1
+    voting_tie_break: str = "random"
+    dictatorship_generators: list[str] = []
+    dictatorship_judge: str = ""
+    routing_router_model: str = ""
+    routing_decision_model: str = ""
+    routing_submode: str = "llm"
+    routing_models: dict[str, str] = {}
     openrouter_configured_via_env: bool = False
     gemini_configured_via_env: bool = False
     groq_configured_via_env: bool = False
@@ -40,6 +51,16 @@ class SettingsUpdate(BaseModel):
     tts_rate: float | None = None
     auto_tts: bool | None = None
     context_fraction: float | None = None
+    voting_models: list[str] | None = None
+    voting_consistency: str | None = None
+    voting_permutation: str | None = None
+    voting_min_votes: int | None = None
+    voting_tie_break: str | None = None
+    dictatorship_generators: list[str] | None = None
+    routing_router_model: str | None = None
+    routing_decision_model: str | None = None
+    routing_submode: str | None = None
+    routing_models: dict[str, str] | None = None
 
 
 # ---------------------------------------------------------------- threads
@@ -54,6 +75,7 @@ class ThreadUpdate(BaseModel):
     model: str | None = None
     system_prompt: str | None = None
     enabled_skills: list[str] | None = None
+    mode: str | None = None
     pinned: bool | None = None
     archived: bool | None = None
 
@@ -64,6 +86,7 @@ class ThreadOut(ORMModel):
     model: str
     system_prompt: str
     enabled_skills: list[str]
+    mode: str = "normal"
     pinned: bool
     archived: bool
     created_at: datetime
@@ -167,6 +190,7 @@ class ChatRequest(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = None
     regenerate_message_id: uuid.UUID | None = None
+    voting_models: list[str] | None = None
 
 
 # ---------------------------------------------------------------- skills

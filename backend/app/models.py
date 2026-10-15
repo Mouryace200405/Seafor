@@ -43,6 +43,8 @@ class Thread(Base):
     summary_cursor: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Skills active for this thread (names). canvas + caveman by default.
     enabled_skills: Mapped[list] = mapped_column(JSON, default=lambda: ["canvas", "caveman"])
+    # Mode: normal | voting (ensemble with position-swap)
+    mode: Mapped[str] = mapped_column(String(32), default="normal")
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

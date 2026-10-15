@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import get_settings
-from .openrouter import complete
+from .providers import complete
 
 settings = get_settings()
 
@@ -105,6 +105,7 @@ async def compact(
     api_key: str | None,
     gemini_api_key: str | None = None,
     groq_api_key: str | None = None,
+    ollama_base_url: str | None = None,
     keep_recent: int | None = None,
 ) -> tuple[str, str | None]:
     """Summarize the oldest part of history, leaving the most recent messages
@@ -137,6 +138,7 @@ async def compact(
             api_key=api_key,
             gemini_api_key=gemini_api_key,
             groq_api_key=groq_api_key,
+            ollama_base_url=ollama_base_url,
             temperature=0.2,
             max_tokens=800,
         )

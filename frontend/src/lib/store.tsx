@@ -248,7 +248,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const runStream = useCallback(
     async (
       threadId: string,
-      body: { content: string; model?: string; regenerate_message_id?: string },
+      body: { content: string; model?: string; regenerate_message_id?: string; voting_models?: string[] },
       optimistic?: { user?: Message; assistant?: Message },
     ) => {
       if (optimistic?.user || optimistic?.assistant) {
@@ -264,10 +264,72 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       abortRef.current = controller;
       let acc = "";
       let reasoning = "";
+      let voting: any = null;
+      let dictatorship: any = null;
+      let routing: any = null;
 
       const patchAssistant = (fn: (m: Message) => Message) => {
         if (!assistantId) return;
         setMessages((prev) => prev.map((m) => (m.id === assistantId ? fn(m) : m)));
+      };
+
+      const onVoting = (ev: any) => {
+        if (ev?.type === "voting_result") {
+          voting = ev;
+          patchAssistant((m) => ({
+            ...m,
+            content: m.content || ev.answer || "",
+            meta: { ...m.meta, mode: "voting", voting: ev },
+          }));
+          return;
+        }
+        if (!voting || typeof voting !== "object") {
+          voting = { candidates: [], rounds: [], votes: [] };
+        }
+        if (ev?.type === "voting_start") {
+          voting = { ...voting, ...ev, candidates: [], rounds: [], votes: [] };
+        } else if (ev?.type === "voting_candidate") {
+          voting.candidates = [...(voting.candidates || []), ev];
+        } else if (ev?.type === "voting_round") {
+          voting.rounds = [...(voting.rounds || []), ev];
+        } else if (ev?.type === "voting_vote") {
+          voting.votes = [...(voting.votes || []), ev];
+        } else if (ev?.type === "voting_tally") {
+          voting = { ...voting, tally: ev.tally, total: ev.total };
+        }
+        patchAssistant((m) => ({ ...m, meta: { ...m.meta, mode: "voting", voting } }));
+      };
+
+      const onDictatorship = (ev: any) => {
+        if (ev?.type === "dictatorship_result") {
+          dictatorship = ev;
+          patchAssistant((m) => ({
+            ...m,
+            content: m.content || ev.answer || "",
+            meta: { ...m.meta, mode: "dictatorship", dictatorship: ev },
+          }));
+          return;
+        }
+        if (!dictatorship || typeof dictatorship !== "object") {
+          dictatorship = { generators: [], candidates: [], comparisons: [] };
+        }
+        if (ev?.type === "dictatorship_start") {
+          dictatorship = { ...dictatorship, ...ev, candidates: [], comparisons: [] };
+        } else if (ev?.type === "dictatorship_generator") {
+          dictatorship.candidates = [...(dictatorship.candidates || []), ev];
+        } else if (ev?.type === "dictatorship_compare") {
+          dictatorship.comparisons = [...(dictatorship.comparisons || []), ev];
+        }
+        patchAssistant((m) => ({ ...m, meta: { ...m.meta, mode: "dictatorship", dictatorship } }));
+      };
+
+      const onRouting = (ev: any) => {
+        routing = ev;
+        patchAssistant((m) => ({
+          ...m,
+          model: ev.model || m.model,
+          meta: { ...m.meta, mode: "routing", routing: ev },
+        }));
       };
 
       try {
@@ -277,12 +339,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           {
             onDelta: (t) => {
               acc += t;
-              patchAssistant((m) => ({ ...m, content: acc }));
+              patchAssistant((m) => ({ ...m, content: m.content + t }));
             },
             onReasoning: (t) => {
               reasoning += t;
               patchAssistant((m) => ({ ...m, meta: { ...m.meta, reasoning } }));
             },
+            onVoting,
+            onDictatorship,
+            onRouting,
             onError: (msg) => {
               setNotice(msg);
               patchAssistant((m) => ({ ...m, meta: { ...m.meta, error: msg } }));
@@ -291,7 +356,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               patchAssistant((m) => ({
                 ...m,
                 content: d.content,
-                meta: { ...m.meta, canvas: d.artifacts, tokens_saved: d.tokens_saved },
+                meta: {
+                  ...m.meta,
+                  canvas: d.artifacts,
+                  tokens_saved: d.tokens_saved,
+                  ...(d.mode ? { mode: d.mode } : {}),
+                  ...(d.voting ? { voting: d.voting } : {}),
+                  ...(d.dictatorship ? { dictatorship: d.dictatorship } : {}),
+                  ...(d.routing ? { routing: d.routing } : {}),
+                },
               }));
             },
           },

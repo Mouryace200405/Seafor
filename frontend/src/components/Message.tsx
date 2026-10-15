@@ -4,6 +4,9 @@ import { speak, stopSpeaking } from "../lib/tts";
 import type { Message as Msg } from "../lib/types";
 import Icon from "./Icon";
 import Markdown from "./Markdown";
+import VotingPanel from "./VotingPanel";
+import DictatorshipPanel from "./DictatorshipPanel";
+import RoutingPanel from "./RoutingPanel";
 
 function fmtTokens(n?: number | null): string {
   if (!n) return "";
@@ -27,6 +30,7 @@ export default function Message({
   const saved = message.meta?.tokens_saved as number | undefined;
   const skillsUsed = (message.meta?.skills as string[] | undefined) || [];
   const memoriesUsed = (message.meta?.memories as number | undefined) || 0;
+  const voting = message.meta?.voting;
   const interval = useRef<number | null>(null);
 
   useEffect(() => {
@@ -107,6 +111,14 @@ export default function Message({
           <div className="msg-content">
             <span className="typing" />
           </div>
+        ) : null}
+
+        {!isUser && voting ? <VotingPanel voting={voting} /> : null}
+        {!isUser && message.meta?.dictatorship ? (
+          <DictatorshipPanel data={message.meta.dictatorship} />
+        ) : null}
+        {!isUser && message.meta?.routing ? (
+          <RoutingPanel data={message.meta.routing} />
         ) : null}
 
         {err ? (

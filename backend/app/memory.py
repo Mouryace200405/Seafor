@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Memory
-from .openrouter import complete
+from .providers import complete
 
 _WORD = re.compile(r"[a-z0-9][a-z0-9'\-]+")
 _STOP = {
@@ -112,6 +112,9 @@ async def extract(
     transcript: str,
     model: str,
     api_key: str | None,
+    gemini_api_key: str | None = None,
+    groq_api_key: str | None = None,
+    ollama_base_url: str | None = None,
     source_thread_id: uuid.UUID | None = None,
 ) -> list[Memory]:
     """Ask the model what is worth remembering, then store de-duplicated facts."""
@@ -125,6 +128,9 @@ async def extract(
             ],
             model=model,
             api_key=api_key,
+            gemini_api_key=gemini_api_key,
+            groq_api_key=groq_api_key,
+            ollama_base_url=ollama_base_url,
             temperature=0.1,
             max_tokens=400,
         )

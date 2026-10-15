@@ -66,6 +66,9 @@ export interface StreamHandlers {
   onMeta?: (d: any) => void;
   onDelta?: (text: string) => void;
   onReasoning?: (text: string) => void;
+  onVoting?: (d: any) => void;
+  onDictatorship?: (d: any) => void;
+  onRouting?: (d: any) => void;
   onFinal?: (d: any) => void;
   onError?: (message: string) => void;
   onDone?: () => void;
@@ -73,7 +76,7 @@ export interface StreamHandlers {
 
 export async function streamChat(
   threadId: string,
-  body: { content: string; model?: string; regenerate_message_id?: string },
+  body: { content: string; model?: string; regenerate_message_id?: string; voting_models?: string[] },
   handlers: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -130,6 +133,15 @@ export async function streamChat(
           break;
         case "reasoning":
           handlers.onReasoning?.(parsed.text);
+          break;
+        case "voting":
+          handlers.onVoting?.(parsed);
+          break;
+        case "dictatorship":
+          handlers.onDictatorship?.(parsed);
+          break;
+        case "routing":
+          handlers.onRouting?.(parsed);
           break;
         case "final":
           handlers.onFinal?.(parsed);

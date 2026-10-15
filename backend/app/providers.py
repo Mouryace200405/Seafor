@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -266,6 +267,101 @@ def _detect_provider(model_id: str) -> Provider:
     return Provider.OPENROUTER
 
 
+_THINK_TAGS = [
+    (" thinking", "</think>"),
+    ("<thinking>", "</thinking>"),
+]
+
+
+class ThinkFilter:
+    """Split inline `` thinking`` / ``<thinking>`` blocks out of a token stream.
+
+    Models that expose chain-of-thought as part of their content (rather than a
+    dedicated field) leak raw `` thinking`` XML. This routes the tagged spans to
+    ``reasoning`` so the UI can render them in its collapsible panel.
+    """
+
+    def __init__(self) -> None:
+        self.in_think = False
+        self.buf = ""
+
+    @staticmethod
+    def _find(text: str, tags: list[str]) -> tuple[int, str] | None:
+        low = text.lower()
+        best: tuple[int, str] | None = None
+        for tag in tags:
+            idx = low.find(tag)
+            if idx != -1 and (best is None or idx < best[0]):
+                best = (idx, tag)
+        return best
+
+    @staticmethod
+    def _hold_len(text: str, tags: list[str]) -> int:
+        low = text.lower()
+        hold = 0
+        for tag in tags:
+            for k in range(1, min(len(tag), len(low) + 1)):
+                if low.endswith(tag[:k]):
+                    hold = max(hold, k)
+        return hold
+
+    def feed(self, text: str) -> list[tuple[str, str]]:
+        self.buf += text
+        out: list[tuple[str, str]] = []
+        while True:
+            if not self.in_think:
+                found = self._find(self.buf, [o for o, _ in _THINK_TAGS])
+                if found:
+                    idx, tag = found
+                    if idx > 0:
+                        out.append(("content", self.buf[:idx]))
+                    self.buf = self.buf[idx + len(tag):]
+                    self.in_think = True
+                    continue
+                hold = self._hold_len(self.buf, [o for o, _ in _THINK_TAGS])
+                if len(self.buf) > hold:
+                    cut = len(self.buf) - hold
+                    out.append(("content", self.buf[:cut]))
+                    self.buf = self.buf[cut:]
+                break
+            else:
+                found = self._find(self.buf, [c for _, c in _THINK_TAGS])
+                if found:
+                    idx, tag = found
+                    if idx > 0:
+                        out.append(("reasoning", self.buf[:idx]))
+                    self.buf = self.buf[idx + len(tag):]
+                    self.in_think = False
+                    continue
+                hold = self._hold_len(self.buf, [c for _, c in _THINK_TAGS])
+                if len(self.buf) > hold:
+                    cut = len(self.buf) - hold
+                    out.append(("reasoning", self.buf[:cut]))
+                    self.buf = self.buf[cut:]
+                break
+        return out
+
+    def flush(self) -> list[tuple[str, str]]:
+        if not self.buf:
+            return []
+        kind = "reasoning" if self.in_think else "content"
+        out = [(kind, self.buf)]
+        self.buf = ""
+        return out
+
+
+_THINK_RE = re.compile(
+    r"<think(?:ing)?>.*?</think(?:ing)?>", re.IGNORECASE | re.DOTALL
+)
+
+
+def strip_think(text: str) -> str:
+    """Remove inline think blocks, keeping only the final answer."""
+    out = _THINK_RE.sub("", text)
+    out = re.sub(r"</?think(?:ing)?>", "", out, flags=re.IGNORECASE)
+    return out.strip()
+
+
 async def stream_chat(
     *,
     messages: list[dict],
@@ -322,6 +418,14 @@ async def stream_chat(
             payload["max_tokens"] = max_tokens
         endpoint = f"{config.base_url}{config.chat_endpoint}"
 
+    tf = ThinkFilter()
+
+    def emit(text: str) -> list[dict]:
+        return [
+            {"type": "delta" if kind == "content" else "reasoning", "text": t}
+            for kind, t in tf.feed(text)
+        ]
+
     timeout = httpx.Timeout(connect=15.0, read=300.0, write=30.0, pool=15.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream("POST", endpoint, headers=headers, json=payload) as resp:
@@ -352,13 +456,18 @@ async def stream_chat(
                         content = cand.get("content", {})
                         for part in content.get("parts", []):
                             if "text" in part:
-                                yield {"type": "delta", "text": part["text"]}
+                                for ev in emit(part["text"]):
+                                    yield ev
                         if chunk.get("usageMetadata"):
                             u = chunk["usageMetadata"]
                             yield {"type": "usage", "prompt_tokens": u.get("promptTokenCount"), "completion_tokens": u.get("candidatesTokenCount")}
                 elif provider == Provider.OLLAMA:
-                    if "message" in chunk and "content" in chunk["message"]:
-                        yield {"type": "delta", "text": chunk["message"]["content"]}
+                    msg = chunk.get("message") or {}
+                    if msg.get("thinking"):
+                        yield {"type": "reasoning", "text": msg["thinking"]}
+                    if "content" in msg and msg["content"]:
+                        for ev in emit(msg["content"]):
+                            yield ev
                     if chunk.get("done"):
                         yield {"type": "usage", "prompt_tokens": chunk.get("prompt_eval_count"), "completion_tokens": chunk.get("eval_count")}
                 else:
@@ -370,12 +479,19 @@ async def stream_chat(
                         if delta.get("reasoning"):
                             yield {"type": "reasoning", "text": delta["reasoning"]}
                         if delta.get("content"):
-                            yield {"type": "delta", "text": delta["content"]}
+                            for ev in emit(delta["content"]):
+                                yield ev
                         finish = choice.get("finish_reason")
                         if finish and finish not in ("stop", "null"):
                             yield {"type": "finish", "reason": finish}
                 if chunk.get("error"):
                     yield {"type": "error", "message": str(chunk["error"])}
+
+    for ev in (
+        {"type": "delta" if kind == "content" else "reasoning", "text": t}
+        for kind, t in tf.flush()
+    ):
+        yield ev
 
 
 async def complete(
@@ -387,10 +503,15 @@ async def complete(
     groq_api_key: str | None = None,
     temperature: float = 0.3,
     max_tokens: int = 1024,
+    ollama_base_url: str | None = None,
 ) -> str:
     provider = _detect_provider(model)
     config = PROVIDERS[provider]
     headers_factory = _get_headers_factory(config.headers_factory)
+
+    base_url = config.base_url
+    if provider == Provider.OLLAMA and ollama_base_url:
+        base_url = ollama_base_url
     
     # Use the appropriate API key based on provider
     if provider == Provider.GEMINI:
@@ -406,36 +527,45 @@ async def complete(
             "contents": [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in messages],
             "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
         }
-        endpoint = f"{config.base_url}/models/{model_name}:generateContent"
+        endpoint = f"{base_url}/models/{model_name}:generateContent"
     elif provider == Provider.OLLAMA:
         model_name = model.replace("ollama/", "").replace("ollama:", "")
         payload = {
             "model": model_name,
             "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
             "stream": False,
+            # Disable chain-of-thought for non-streaming calls: thinking models
+            # otherwise emit everything into "thinking" (or burn the whole token
+            # budget) and leave "content" empty, which breaks JSON extraction in
+            # judges/summarizers. Ignored by models that don't support thinking.
+            "think": False,
             "options": {"temperature": temperature, "num_predict": max_tokens},
         }
-        endpoint = f"{config.base_url}{config.chat_endpoint}"
+        endpoint = f"{base_url}{config.chat_endpoint}"
     else:
         payload = {"model": model.replace("groq/", "").replace("openrouter/", ""), "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
-        endpoint = f"{config.base_url}{config.chat_endpoint}"
+        endpoint = f"{base_url}{config.chat_endpoint}"
 
     async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.post(endpoint, headers=headers, json=payload)
         resp.raise_for_status()
         data = resp.json()
+        text = ""
         if provider == Provider.GEMINI:
             for cand in data.get("candidates", []):
                 for part in cand.get("content", {}).get("parts", []):
                     if "text" in part:
-                        return part["text"]
-            return ""
-        if provider == Provider.OLLAMA:
-            return data.get("message", {}).get("content", "")
-        choices = data.get("choices") or []
-        if not choices:
-            return ""
-        return (choices[0].get("message") or {}).get("content") or ""
+                        text = part["text"]
+                        break
+                if text:
+                    break
+        elif provider == Provider.OLLAMA:
+            text = data.get("message", {}).get("content", "")
+        else:
+            choices = data.get("choices") or []
+            if choices:
+                text = (choices[0].get("message") or {}).get("content") or ""
+        return strip_think(text)
 
 
 def _extract_error(status: int, body: str) -> str:
